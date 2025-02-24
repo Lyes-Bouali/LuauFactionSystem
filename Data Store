@@ -1,0 +1,209 @@
+local dss = game:GetService("DataStoreService")
+local sss = game:GetService("ServerScriptService")
+local rs = game:GetService("ReplicatedStorage")
+local CFH = rs.CheckFactionHandler
+local BGUIH = rs.ButtonGUIHandler
+local IH = rs.InviteHandler
+local ps = game:GetService("Players")
+-- Standard Variables ^
+local playerData = dss:GetDataStore("PlayerData")
+local DataStore = dss:GetDataStore("FactionData")
+local factionListDataStore = dss:GetDataStore("FactionList")
+-- Data Stores ^
+local factionModule = require(sss.FactionModule)
+local factionListKey = 1
+-- Faction Related Variables ^
+
+local function saveData(player) -- Just saves your Mon, that's it.
+
+	local saveTable = {
+		player.leaderstats.Mon.Value;
+	}
+
+	local success,errorMessage = pcall(playerData.SetAsync, playerData, player.UserId, saveTable)
+
+	if success then
+		print("Data saved")
+	else
+		print("Data wasn't saved")
+		warn(errorMessage)
+	end
+
+end
+
+local function userLeave(playerId) -- Runs whenever a player leaves a faction.
+
+	factionModule.LeaveFaction(playerId) -- Call upon the leave faction module function
+
+	if ps:GetPlayerByUserId(playerId) then -- Update factionlessness in-game too if possible.
+		ps:GetPlayerByUserId(playerId).Faction.Value = "Factionless"
+	end
+
+end
+
+game.Players.PlayerAdded:Connect(function(player)
+
+	player.CharacterAdded:Wait() -- Wait until character loads in
+
+	local leaderstats = Instance.new("Folder",player) -- Initalize a folder that holds all the game's data
+	leaderstats.Name = "leaderstats"
+
+	local Mon = Instance.new("IntValue",leaderstats) -- Create an int value that holds a player's Mon amount
+	Mon.Name = "Mon"
+
+	local Faction = Instance.new("StringValue",player) -- Create a string value that holds a player's faction name
+	Faction.Name = "Faction"
+	Faction.Value = "Factionless"
+
+	local data = nil -- Currently no data has been gathered.
+
+	local success,errorMessage = pcall(function() -- pcall is a function that tries to call a function, it returns success and then an error message if applicable.
+		data = playerData:GetAsync(player.UserId) -- Set data to be the players's data
+	end)
+
+	if success and data then -- We succeeded and data has a value then...
+
+		Mon.Value = data[1] -- Set each value
+
+		local factionName = factionModule.IsInFaction(player.UserId) -- This function returns a table with the player's faction name as a second value
+
+		if factionName then
+
+			Faction.Value = factionName -- Set the player's faction value to be their faction name
+
+		elseif factionName == nil then
+
+			warn("Failed to get faction name upon joining")
+
+		end
+
+	else
+
+		print('Data couldn\'t be gathered.') -- Data failed to recieve because either no success or no data.
+
+		warn(errorMessage) -- Warn there's an error and mention data couldn't be gathered. This can most likely occur from random roblox fail, such as DSS going down.
+
+	end
+
+end)
+
+game.Players.PlayerRemoving:Connect(function(player) -- Save player data when leaving.
+	saveData(player)
+end)
+
+game:BindToClose(function()  -- Save player data when server closes, be it from force shutdown or whatever.
+	for _, player in ipairs(game.Players:GetPlayers()) do
+		task.spawn(saveData,player)
+	end
+end)
+
+CFH.OnServerEvent:Connect(function(player,data)
+	if data then -- If this is true, it means we ONLY want to get the factionData
+		local factionData = factionModule.getData(DataStore, player.Faction.Value) -- Retrieves factionData with the module script function.
+		CFH:FireClient(player,factionData) -- Sends it back to the client.
+		return factionData -- Breaks out so the extra code isn't ran.
+	end
+	-- Whenever a player interacts with the GUI and it needs to check their data, it connects here and returns whether or not they are currently in a faction.
+	if player.Faction.Value == "Factionless" then
+		CFH:FireClient(player,false) -- Sends to the client that the player is factionless.
+	else
+		local factionData = factionModule.getData(DataStore, player.Faction.Value) -- Gets the factionData so then the player's local gui for the member list is updated.
+		CFH:FireClient(player,factionData) -- Sends factionData (who is in the faction and their rank in it) back to the client.
+	end
+end)
+
+BGUIH.OnServerEvent:Connect(function(player,action,username)
+
+	local UserID = nil
+	local playerId = player.UserId
+	local factionName = player.Faction.Value
+
+	if username then -- This checks if parameter username is provided
+
+		UserID = ps:GetUserIdFromNameAsync(username) -- Gets UserID from their username
+
+	end
+
+	if action == "Leave" then -- If we send a request to leave, then we will leave.
+
+		userLeave(playerId) -- Fire the function to leave the faction.
+
+	else
+
+		if UserID ~= nil then -- If there is a second player provided,
+
+			if action == "Invite" then -- If we want to invite them...
+
+				factionModule.InviteMember(factionName,UserID,playerId) -- This checks if we have permissions to invite and then completes the invitation.
+
+			else
+
+				factionModule.RankMember(action,factionName,playerId,UserID) -- If we don't want to invite, we want to promote or demote, which is handled by this function.
+
+			end
+
+			local player2 = ps:GetPlayerByUserId(UserID) -- This get's the second person's player if it's in the server.
+
+			if player2 then -- If it's not nil, which means they are in the server,
+
+				local playerFactionData = factionModule.IsPlayerInFaction(UserID,factionName) --  Then  we will get the data we just updated
+				if playerFactionData then
+					print(factionName)
+					player2.Faction.Value = factionName -- And set it to be their data so then their data is always the most recent/updated data.
+				end
+			end
+
+		else
+
+			print("Invalid UserID.") -- If the UserID is nil, then we send an alert about happened.
+
+		end
+
+	end
+
+
+end)
+
+IH.OnServerEvent:Connect(function(player,action)
+
+	local Invitation = player.PlayerGui.Invite
+
+	if action == "Join" then
+		-- If the player wants to join
+		local factionName = player.PlayerGui.Invite:GetAttribute("FactionName")
+		-- Find the faction name of the faction the player wants to join, check if it's not empty.
+		if factionName then
+
+			local isInFactionResult = factionModule.IsInFaction(player.UserId)
+			--If the player wants to join, double check if they're in a faction
+			if isInFactionResult	~= false then
+				-- If they're in a faction or the data was failed to be retrieved, disable the invitation.
+				Invitation.Enabled = false
+
+			else
+
+				print(factionName)
+				-- Add the user
+				factionModule.AddUser(factionName,{player.UserId,1})
+				-- Disable all their GUI aspects regarding the faction and invite.
+				player.Faction.Value = factionName
+				Invitation.Enabled = false
+				player.PlayerGui.FactionButtons.FactionlessGUIFrame.Visible = false			
+
+			end
+
+		end
+
+	else
+		-- IF the player doesn't wanna join, simply disable the frame.
+		Invitation.Enabled = false
+
+	end
+
+	if Invitation:GetAttribute("FactionName") ~= "" then
+		-- This makes it FactionName attribute is responsible for what faction the player joins, and also gives a cooldown. ALWAYS SET TO "" after.
+		Invitation:SetAttribute("FactionName","")
+
+	end
+
+end)
