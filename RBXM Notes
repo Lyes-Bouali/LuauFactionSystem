@@ -1,0 +1,12 @@
+-- Drop all components into the service with the dedicated name.
+	-- Example: Drop everything *inside* the ServerScriptService folder into the ServerScriptService.
+
+-- You may run commands from the FactionModule manually by using the Developer Console, accessible via /console or F9. 
+	-- Run these commands through the server
+	
+	-- Example: factionModule = require(game.ServerScriptService.FactionModule)
+	-- Example line 2: factionModule.CreateFaction("Example", UserID)
+	
+	-- A UserID can be obtained on someone's user page. It should look something like 1234567890
+	
+-- Factions must be made manually first, but after that, they are entirely self sufficient
