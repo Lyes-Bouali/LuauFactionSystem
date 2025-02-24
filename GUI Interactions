@@ -1,0 +1,262 @@
+local ReplicatedStorage= game:GetService("ReplicatedStorage")
+local CFH = ReplicatedStorage.CheckFactionHandler
+local BGUIH = ReplicatedStorage.ButtonGUIHandler
+local IH = ReplicatedStorage.InviteHandler
+local player = game:GetService("Players").LocalPlayer
+-- Initalize necessary variables
+
+local playerGui = player.PlayerGui
+local factionButtons = playerGui.FactionButtons
+local leaveFaction = playerGui.LeaveFaction
+local button = factionButtons.ButtonFrame.ButtonGUI
+local factionGUI = factionButtons.FactionGUIFrame
+local factionlessGUI = factionButtons.FactionlessGUIFrame
+local promote = factionGUI.PromoteButton
+local demote = factionGUI.DemoteButton
+local invite = factionGUI.InviteButton
+local leave = factionGUI.LeaveButton -- Leave button on the GUI before confirmation
+local textbox = factionGUI.TextBox -- Textbox where players type which user they want to promote/demote/rank.
+local leaveButton = leaveFaction.BackFrame.LeaveFrame.LeaveButton -- Confirmation leave faction button
+local stayButton =  leaveFaction.BackFrame.LeaveFrame.StayButton -- Confirmation stay in faction button
+local invitationFrame = playerGui.Invite
+local mainFrame = invitationFrame.BackFrame.MainFrame
+local acceptInvite = mainFrame.JoinButton
+local declineInvite = mainFrame.StayButton
+-- All of the possible needed GUI elements as variables
+
+local promoteDebounce = false
+local demoteDebounce = false
+local inviteDebounce = false
+-- Initialize debounce times for each button to avoid spam and server lag.
+
+local frameHeight = .1
+-- Determines the height of each member on the member list of a faction
+
+local rankNames = {"Member","Admin","Owner"}
+-- Determines how rank names show up in the member list of a faction
+
+local function InDivision()
+
+	CFH:FireServer()
+	--Use remote event to access server to check if player is factionless, then the server sends a boolean back.
+	local factionData = CFH.OnClientEvent:Wait(function(factionData)
+		-- Gets the faction data from the server to update the member list on the right hand side.
+		return {factionData}
+
+	end)
+
+	return factionData
+
+end
+
+local function initalizeFrames(factionData)
+
+	-- This script initalizes each individual frame for each player in the member list. Understanding how this works is not necessary.
+	if factionData then
+
+		local num = #factionData
+		local usersScrollingFrame = promote.Parent.UsersScrollingFrame
+
+		for i,v in pairs(usersScrollingFrame.UsersFrame:GetChildren()) do
+
+			v:Destroy()
+
+		end
+
+
+		for i,v in pairs(factionData) do
+
+			local playerName = game.Players:GetNameFromUserIdAsync(v[1]) -- v[1] is the player's UserId
+			local rank = v[2] -- This is a value 1-3
+			local rankName = rankNames[rank]
+			local CopyFrame = player.PlayerGui.UserDisplay:Clone()
+
+			usersScrollingFrame.CanvasSize = UDim2.new(0,0,num*frameHeight,0)
+
+			CopyFrame.Text = playerName .. " | "  .. rankName
+			CopyFrame.Name = playerName.."Frame"
+			CopyFrame.Parent = usersScrollingFrame.UsersFrame
+
+			if i == 1 then
+
+				CopyFrame.Size = UDim2.new(1,0,frameHeight,0)
+
+			else
+
+				CopyFrame.Size = UDim2.new(1,0,frameHeight,0)
+				CopyFrame.Position = UDim2.new(0,0,frameHeight*(i-1),0)
+
+			end
+
+		end
+	else
+
+		warn("No faction data found.")
+
+	end
+
+end
+
+local function getData()
+	-- Fires to CFH with the parameter "true" to **only** get data.
+	CFH:FireServer(true)
+
+	local data = CFH.OnClientEvent:Wait(function(data)
+		return data
+	end)
+	-- Returns the data, the data retrieved looks like {{UserID,RankValue},{UserID2,RankValue2},...}
+	return data
+
+end
+
+button.MouseButton1Click:Connect(function()
+
+	if button.Text == "Open" then
+		-- When opening the gui, we get the faction data in order to initalize the member list later on. This also lets us check whether or not the player is in a faction.
+		local factionData = InDivision()
+
+		button.Text = "Close"
+		-- Set the button text to be closed, and check if the data received is a table, if it's a boolean, the player is factionless, check CFH.OnServerEvent in DataStore.
+		if type(factionData) == "table" then
+
+			factionGUI.Visible = true
+			factionlessGUI.Visible = false
+			-- Player is in faction, so show faction GUI and create the member list, also hide factionless GUI.
+			initalizeFrames(factionData)
+
+		else
+			-- Player is not in a faction, hide faction GUI, show factionless GUI.
+			factionlessGUI.Visible = true
+			factionGUI.Visible = false
+
+		end
+
+	else
+		-- This is for closing the button, you simply hide both faction and factionless GUIs.
+		button.Text = "Open"
+		factionGUI.Visible = false
+		factionlessGUI.Visible = false
+
+	end
+
+end)
+
+leave.MouseButton1Click:Connect(function()
+
+	factionButtons.Enabled = false
+	leaveFaction.Enabled = true
+	-- If the leave button is pressed, show the confirm leave button screen and hide the faction open and other GUI.
+
+end)
+
+promote.MouseButton1Click:Connect(function()
+
+	if not promoteDebounce then
+
+		promoteDebounce = true -- The active is temporarily set to false is to stop users from constantly sending requests to the server and halt updates.
+		promote.Active = false -- I literally don't even know what active does, it just sounds important and right for deactivating a button.
+		promote.AutoButtonColor = false
+
+		local username = textbox.Text -- Get the username text typed in the textbox.
+		BGUIH:FireServer("Promote",username) -- Send a code to the server, tell it we want to promote/demote/invite and then the player's username
+		-- Check BUIGH.OnServerEvent:Connect() in DataStore for more info about how it works.
+		promote.Text = "Cooldown..." -- Change the text to show the button is on cooldown.
+
+		task.wait(.5) -- Wait .5 seconds before initalizing frames, this gives time for the server to promote the player.
+
+		local factionData = getData() -- Get the faction data to update the member list after the new promotion/demotion/invite.
+		initalizeFrames(factionData) -- Use that faction data to update the member list.
+
+		task.wait(2.5) -- Wait 3 seconds before setting the button available again.
+
+		promote.Text = "Promote"
+		promote.Active = true
+		promote.AutoButtonColor = true
+		promoteDebounce = false
+
+	end
+
+end)
+
+demote.MouseButton1Click:Connect(function()
+
+	if not demoteDebounce then
+
+		demoteDebounce = true -- Check promote for how this works.
+		demote.Active = false
+		demote.AutoButtonColor = false
+
+		local username = textbox.Text
+		BGUIH:FireServer("Demote",username)
+
+		demote.Text = "Cooldown..."
+
+		task.wait(.5)
+
+		local factionData = getData()
+		initalizeFrames(factionData)
+
+		task.wait(2.5)
+
+		demote.Text = "Demote"
+		demote.Active = true
+		demote.AutoButtonColor = true
+		demoteDebounce = false
+	end
+
+end)
+
+invite.MouseButton1Click:Connect(function()
+
+	if not inviteDebounce then
+
+		inviteDebounce = true -- Check promote for how this works.
+		invite.Active = false
+		invite.AutoButtonColor = false
+
+		local username = textbox.Text
+		BGUIH:FireServer("Invite",username)
+
+		invite.Text = "Cooldown..."
+
+		task.wait(3)
+
+		invite.Text = "Invite to Faction"
+		invite.Active = true
+		invite.AutoButtonColor = true
+		inviteDebounce = false
+
+	end
+
+end)
+
+leaveButton.Activated:Connect(function()
+
+	BGUIH:FireServer("Leave") -- The confirmation leave button was clicked, fire to the server to leave your faction.
+
+	leaveFaction.Enabled = false -- Reenable the main GUI and disable the leaveFaction GUI.
+	factionButtons.Enabled = true
+
+	factionlessGUI.Visible = true -- Show the factionless GUI and hide the factionGUI.
+	factionGUI.Visible = false
+
+end)
+
+stayButton.Activated:Connect(function()
+
+	leaveFaction.Enabled = false -- Since the button to stay in your faction on the leave faction confirmation screen was pressed, hide leave gui and show the faction gui.
+	factionButtons.Enabled = true
+
+end)
+
+acceptInvite.Activated:Connect(function()
+
+	IH:FireServer("Join") -- Sends a message to the server to say we wanna join the faction.
+
+end)
+
+declineInvite.Activated:Connect(function()
+
+	IH:FireServer() -- Sends a message that we do not want to join the faction. (As long as any parameter that is not "join" then the player will not join)
+	-- This is because we check if action == "Join", refer to DataStore, IH.OnServerEvent:Connect. This has the script for what occurs.
+end)
