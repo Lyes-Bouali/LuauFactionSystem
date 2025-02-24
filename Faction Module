@@ -1,0 +1,402 @@
+local module = {}
+
+local dss = game:GetService("DataStoreService")
+local DataStore = dss:GetDataStore("FactionData")
+local factionListDataStore = dss:GetDataStore("FactionList")
+
+local factionListKey = 1
+
+local function saveData(dataStore,key,dataToSave) -- Function to override data regardless of which datastore it is.
+
+	local success,errorMessage = pcall(dataStore.SetAsync, dataStore, key, dataToSave) -- pcall calls a function and gives an error message in case one arises
+	-- Here we use it to  call SetAsync to overwrite a given datastore key with data to save.
+	if success then
+
+		print("Data saved successfully")
+
+	else
+
+		print("Data was not saved")
+		-- Using SetAsync() there's a small percentage that it can fail depending on roblox's connection.
+		-- For example, sometimes almost all games in roblox have saving issues at a random moment in time due to roblox's servers or something like that going down
+		-- There is no way to avoid this, the only option is to use UpdateAsync() when possible as if it returns nil, it will not update the data. Whereas saveasync()
+		-- will always override whatever data is stored in. So TL;DR: Try to use UpdateAsync.
+		warn(errorMessage)
+
+	end
+
+end
+
+local function sendInvitation(invitedPlayer,factionName)
+
+	local Invitation = invitedPlayer.PlayerGui.Invite
+	local MainFrame = Invitation.BackFrame.MainFrame
+
+	MainFrame.TextLabel.Text = "Would You Like to Join the Faction Named: " .. factionName .. "?"
+	Invitation.Enabled = true
+
+	-- Literally that's all, the rest is in the DataStore script, check for the invite handler on server event for the rest.
+
+end
+
+module.AddUser = function(key,playerData) -- Adds a player to a faction using the updateasync() function
+
+	DataStore:UpdateAsync(key,function(oldData) -- Updates a data store instead of completely overwriting it like save.
+
+		if playerData and oldData then -- If both the datas are not nil.
+
+			table.insert(oldData,playerData) -- Adds the player's data to the end of the table.
+
+			return oldData -- Sends the data back so it's updated.
+
+		end
+
+	end)
+
+end
+
+module.getData  = function(dataStore,key) -- Returns the data for a given key in a datastore, returns nil in case of an error.
+
+	local data = nil	 -- No data currently gathered
+
+	local success,errorMessage = pcall(function()
+
+		data = dataStore:GetAsync(key) -- GetAsync get's that data store key's data.
+
+	end)
+
+	if success then -- If data is sucessfully retrieved, return it
+
+		return data
+
+	else -- If not, return nil to say it's bad data and forward an error message.
+
+		print("Data failed to retrieve.")
+
+		warn(errorMessage)
+
+		return nil
+
+	end
+
+end
+
+module.FindPlayerData = function(playerId, factionName) -- Finds a player's data when given their factionName and returns it.
+
+	local factionData = module.getData(DataStore,factionName) -- Saves the whole faction's data in a variable
+
+	for i,v  in pairs(factionData) do -- Loops through the faction data table. v is {userId,rankValue}. i is the index.
+
+		if v[1] == playerId then -- Each v is a table that contains a userId and rankValue. The first thing in the table is a userId.
+
+			return v -- Sends the player's data back to  break out the loop.
+
+		end
+
+	end
+
+end
+
+module.CreateFaction = function(factionName,playerId) -- Creates a faction based of a given name and playerId (they will become the owner of the faction)
+
+	if DataStore:GetAsync(factionName) == nil and factionName ~= "Factionless" then -- Check if faction name isn't taken.
+
+		local members = {{playerId,3},} -- Since the faction isn't taken, add the player who made it with owner perms to a table as the first value
+
+		local success,errorMessage = pcall(DataStore.SetAsync, DataStore, factionName, members) -- saves the members to factionName in the data store
+
+		if success then -- If the data was successfully set then...
+
+			factionListDataStore:UpdateAsync(factionListKey,function(oldList) -- Get the old faction list...
+
+				if oldList ~= nil then -- If the list is sucessfully retrieved
+
+					table.insert(oldList,factionName) -- Then we add the new faction name to the list of factions.
+
+					return oldList -- Return will update the data store.
+
+				else
+
+					warn("No faction list found, report if anything weird occurs") -- This means that no factions currently exist in the faction list.
+
+				end
+
+			end)
+
+			print("Faction successfully created!") -- Go ahead and say we made a faction successfully.
+
+		else
+
+			print("Faction was not created") -- Warn that the faction was not created due to whatever reason.
+			warn(errorMessage)
+
+		end
+
+	else
+
+		print("That faction name either already exists, or the faction name cannot be set to \"Factionless\".") -- Self explanatory.
+
+	end
+
+end
+
+module.CheckPerms = function(factionData,playerId,player2Id) -- If player2Id is not given, then the function can return true or false. True indicates the player is the owner, false indicates they have admin permissions.
+	-- If both playerId parameters are given, it will return true meaning player1 can promote and demote player2, and false meaning they can only demote player2. **Nil is given in every circumstance for lacking permissions for any command.**
+	local rank = nil
+	local rank2 = nil
+
+	for i,v in pairs(factionData) do -- loops through all {userId,rankValue}
+
+		if v[1] == playerId then -- if userId is the player1's id, then we save the value to rank.
+
+			if v[2] >= 2 then
+
+				rank = v[2]
+
+			end
+
+		end
+
+		if player2Id then -- if player 2 is given as a parameter, then we check if 
+
+			if v[1] == player2Id then
+
+				rank2 = v[2]
+
+			end
+
+			if rank and rank2 then -- if we have both ranks, then break the loop
+
+				break
+
+			end
+
+		else
+
+			if rank then -- if we have a rank then break.
+
+				break
+
+			end
+
+		end
+
+
+
+	end
+
+	if rank then -- if the player has a rank
+
+		if rank2 then -- if player 2 has a rank
+
+			if rank > rank2 then -- if player 1 has a higher rank than player 2
+
+				if (rank-rank2) == 2 then -- if the difference between ranks is 2 (it means they can promote)
+
+					return true -- return true for can promote
+
+				else
+
+					return false  -- return false for demote
+
+				end
+
+			end
+
+		else
+
+			if rank>=2 then
+
+				if rank == 3 then
+
+					return true -- if player is the owner, useful for owner exclusive permissions
+
+				else
+
+					return false -- if player is an admin
+
+				end
+
+			end
+
+		end
+
+	end
+
+	return nil -- basically, no permission
+
+end
+
+module.IsPlayerInFaction = function(playerId,factionName) -- Checks if the player is in a faction and return true if they are. Good for checking if they can be promoted/demoted.
+
+	if factionName and factionName ~= "Factionless" then -- If a faction name is given that's not factionless,
+
+		local factionData = module.getData(DataStore,factionName) -- Then we get all the data for that faction
+
+		for i,v in pairs(factionData) do -- We loop through all the data to check if the playerId is stored in there, if it is, they are in that faction.
+
+			if v[1] == playerId then
+
+				return true -- Return true because the player is in faction name
+
+			end
+
+		end
+
+	else
+
+		print("Faction name not provided, isPlayerInFaction") -- Either a faction name wasn't provided, or it factionless.
+
+	end
+
+end
+
+module.IsInFaction = function(playerId) -- Checks if a player is in a faction and returns factionName. It will send back false if player was not found in faction data store. Perfecting for checking if a player can be invited to factions.
+
+	local factionList = module.getData(factionListDataStore,factionListKey) -- Saves a list of all faction names
+
+	if factionList ~= nil then -- If faction list is not nil, meaning it has factions in it
+
+		for _,v in pairs(factionList) do -- Then we will loop through every single possible faction in that list
+
+			for i,data in pairs(DataStore:GetAsync(v)) do -- And check for every single bit of data in those factions
+
+				if data[1] == playerId then -- If we eventually find the player's data within the faction
+
+					return v -- We break out by returning the factionName
+
+				end
+
+			end
+
+		end
+
+		return false -- Returns false if no player data was found in any faction, player is factionless.
+
+	else
+
+		warn("Faction list is nil, IsInFaction")
+		-- Returns nil in case no data was found due to faction list failing to be retrieved.
+
+	end
+
+end
+
+module.InviteMember = function(factionName,invitedId,inviterId) -- Invites a player to a faction supposing the inviter has permissions to invite, and invited is not in a faction. Does not return anything.
+
+	local factionData = module.getData(DataStore,factionName)
+	-- Save inviter's faction data and permissions between the two
+	local checkPerms = module.CheckPerms(factionData,inviterId)
+
+	if checkPerms ~= nil then -- checks if inviter has inviting perms in a faction
+
+		local isInFactionResult = module.IsInFaction(invitedId)
+
+		-- Checks if the second player isn't in a faction.
+		if isInFactionResult == false then
+
+			local invitedPlayer = game.Players:GetPlayerByUserId(invitedId)
+
+			if invitedPlayer ~= nil and invitedPlayer.PlayerGui.Invite:GetAttribute("FactionName") == "" then -- Checks if the second player is in the same server and their invitation isn't already tied to another faction name,
+
+				sendInvitation(invitedPlayer,factionName)
+				invitedPlayer.PlayerGui.Invite:SetAttribute("FactionName",factionName)
+
+				-- The rest of the code is in the invite handler's on server event connect. Some is in the GUI interactions.
+
+			else
+
+				--game.Players:GetPlayerByUserId(inviterId).PlayerGui.FactionButtons.FactionGUIFrame.TextBox.Text = "Player is not in the server. Cannot invite." -- Forwards a message to say you can't invite players who are not in your server.
+
+				if invitedPlayer == nil then
+					print("You cannot send invites to players who are not in your server.")
+				else
+					print("You also cannot send invites to people who already have an outgoing invitation.")
+				end
+
+			end
+
+		end
+
+	end
+
+end
+
+module.RankMember = function(action, factionName, _moterId, _motedId) -- Promotes or demotes a member. Automatically kicking them if they are demoted below member.
+
+	DataStore:UpdateAsync(factionName,function(oldData)
+		-- Says it will update the datastore
+		if oldData ~= nil then
+			-- If the old data was successfully retrieved
+			local authority = module.CheckPerms(oldData,_moterId,_motedId)
+			--  Checks if a player has authroity to promote or demote
+			if authority ~= nil then
+
+				for i,v in pairs(oldData) do
+					-- Loops through all of the data
+					if v[1] == _motedId then
+						-- If we find the (pro/de)moted player's data
+						if authority and action == "Promote" then
+							-- If authority == true, then they have permission to promote, so check that and the action is prmote 
+							oldData[i][2] += 1
+							-- If so, promote the player
+						elseif action == "Demote" then
+							-- Else if the action is demote, then checking authority is satisfied by the authority ~= nil line.
+							oldData[i][2] -= 1
+
+							if oldData[i][2] < 1 then
+								-- If a player's rank has gone below member, we remove them from the table, kicking them out of the faction
+								table.remove(oldData,i)
+
+							end
+
+						end
+						-- Once we find the pro/demoted player and update their values, we can freely break out of the loop.
+						break
+
+					end
+
+				end
+				-- Finally, we return the oldData since we updated it with their new role.
+				return oldData
+
+			end
+
+		end
+	end)	
+
+end
+
+module.LeaveFaction = function(playerId) -- This function is useful for players pressing the leave faction button, and currently the rank member script.
+
+	local factionName = module.IsInFaction(playerId) -- Check if a player is in a faction
+
+	if factionName then -- If it returns a string, it means the player is in a faction or not in one, if they're not in one, it returns "false" and the string is the faction name.
+
+		DataStore:UpdateAsync(factionName,function(factionData) -- Update the datastore
+
+			if factionData ~= nil then -- Check if the data is properly obtained
+
+				for i,v in pairs(factionData) do -- Loop through all the old data
+
+					if v[1] == playerId then -- Once you find their player
+
+						table.remove(factionData,i) -- Remove them from the faction
+
+						return factionData -- Return the faction to save it
+
+					end
+
+				end
+
+			end
+
+			return nil -- Nil indicates cancel operation, if the faction data is nil, we should return nil because the data might be wrong due to roblox servers dying.
+
+		end)
+
+	end
+
+end
+
+return module
